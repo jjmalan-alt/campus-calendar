@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>School & Activities Calendar</title>
+
+    <script src="https://unpkg.com/ical.js@1.5.0/build/ical.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.20/index.global.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@fullcalendar/icalendar@6.1.20/index.global.min.js"></script>
+
+    <style>
+        /* --- THEME DEFINITIONS --- */
+        :root {
+            --bg-color: #f0f2f5;
+            --container-bg: #ffffff;
+            --text-color: #333333;
+            --border-color: #ddd;
+        }
+
+        [data-theme="dark"] {
+            --bg-color: #1a1a1b;
+            --container-bg: #2d2d2e;
+            --text-color: #e5e5e5;
+            --border-color: #444;
+            --fc-page-bg-color: #1a1a1b;
+            --fc-neutral-bg-color: #383839;
+            --fc-list-event-hover-bg-color: #383839;
+            --fc-border-color: #444;
+            --fc-button-text-color: #fff;
+        }
+
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            margin: 0; padding: 20px;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            transition: background-color 0.3s ease;
+        }
+
+        #calendar-wrapper {
+            max-width: 1100px;
+            margin: 0 auto;
+            background: var(--container-bg);
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+
+        /* --- CONTROLS & LEGEND --- */
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            max-width: 1100px;
+            margin: 0 auto 20px auto;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .legend { font-size: 14px; display: flex; gap: 15px; }
+        .legend-item { display: flex; align-items: center; gap: 5px; }
+        .dot { height: 12px; width: 12px; border-radius: 50%; display: inline-block; }
+
+        #loading { display: none; font-weight: bold; color: #007bff; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
+
+        #theme-toggle {
+            padding: 8px 16px; cursor: pointer; border-radius: 20px;
+            border: 1px solid var(--border-color);
+            background: var(--container-bg); color: var(--text-color);
+            font-size: 13px; font-weight: 600;
+        }
+
+        /* --- CALENDAR STYLING --- */
+        .fc-button { text-transform: capitalize !important; font-weight: normal !important; }
+        .fc-event { cursor: pointer; transition: filter 0.2s; border: none !important; }
+        .fc-event:hover { filter: brightness(85%); }
+
+        /* --- MODAL POPUP --- */
+        .modal {
+            display: none; position: fixed; z-index: 9999;
+            left: 0; top: 0; width: 100%; height: 100%;
+            background-color: rgba(0,0,0,0.6); backdrop-filter: blur(2px);
+        }
+
+        .modal-content {
+            background-color: var(--container-bg); color: var(--text-color);
+            margin: 10% auto; padding: 30px; border-radius: 12px;
+            width: 90%; max-width: 500px; position: relative;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+
+        .close-button { position: absolute; right: 20px; top: 15px; font-size: 28px; cursor: pointer; opacity: 0.5; }
+        .close-button:hover { opacity: 1; }
+
+        @media (max-width: 768px) {
+            body { padding: 10px; }
+            .fc-toolbar { flex-direction: column; gap: 10px; }
+            .modal-content { margin: 20% auto; width: 85%; }
+            .legend { order: 2; width: 100%; justify-content: center; }
+        }
+    </style>
+</head>
+<body data-theme="light">
+
+    <div class="controls">
+        <div class="legend">
+            <div class="legend-item"><span class="dot" style="background-color: #a1daf8;"></span> Whanganui Collegiate</div>
+            <div class="legend-item"><span class="dot" style="background-color: #000cb6;"></span> St George's</div>
+        </div>
+        <div id="loading">📡 Syncing Feeds...</div>
+        <button id="theme-toggle">🌙 Dark Mode</button>
+    </div>
+
+    <div id="calendar-wrapper">
+        <div id='calendar'></div>
+    </div>
+
+    <div id="eventModal" class="modal">
+        <div class="modal-content">
+            <span class="close-button">&times;</span>
+            <h2 id="modalTitle" style="color: #007bff; margin-top: 0; padding-right: 20px;"></h2>
+            <p><strong>🕒 Time:</strong> <span id="modalTime"></span></p>
+            <p><strong>📍 Location:</strong> <span id="modalLocation"></span></p>
+            <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 15px 0;">
+            <div id="modalDescription" style="line-height: 1.6; max-height: 300px; overflow-y: auto;"></div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            
+            // 1. THEME TOGGLE
+            const toggleBtn = document.getElementById('theme-toggle');
+            toggleBtn.onclick = () => {
+                const isLight = document.body.getAttribute('data-theme') === 'light';
+                document.body.setAttribute('data-theme', isLight ? 'dark' : 'light');
+                toggleBtn.innerHTML = isLight ? "☀️ Light Mode" : "🌙 Dark Mode";
+            };
+
+            // 2. MODAL LOGIC
+            const modal = document.getElementById("eventModal");
+            document.querySelector(".close-button").onclick = () => modal.style.display = "none";
+            window.onclick = (e) => { if (e.target == modal) modal.style.display = "none"; }
+
+            // 3. DEFINE LINKS
+            const calendarLinks = [
+                {
+                    url: 'https://schoolbox.collegiate.school.nz/calendar/export.php?export=group&group=1139&event_type=&token=57bbf17cee18b093bc40299ad',
+                    color: '#a1daf8',
+                    textColor: '#000000',
+                    label: 'Whanganui Collegiate'
+                },
+                {
+                    url: 'https://stgeorges-portal.school.kiwi/ics/school.ics',
+                    color: '#000cb6',
+                    textColor: '#ffffff',
+                    label: 'St Georges'
+                }
+            ];
+
+            // 4. CALENDAR INITIALIZATION
+            const calendarEl = document.getElementById('calendar');
+            const loadingEl = document.getElementById('loading');
+            
+            const calendar = new FullCalendar.Calendar(calendarEl, {
+                initialView: window.innerWidth < 768 ? 'listWeek' : 'dayGridMonth',
+                height: 'auto',
+                firstDay: 1, // Monday start
+                headerToolbar: {
+                    left: 'prev,next today',
+                    center: 'title',
+                    right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek'
+                },
+                buttonText: { today: 'Today', month: 'Month', week: 'Week', day: 'Day', list: 'List' },
+
+                eventClick: function(info) {
+                    document.getElementById("modalTitle").innerText = info.event.title;
+                    document.getElementById("modalTime").innerText = info.event.start.toLocaleString([], {weekday: 'long', month: 'long', day: 'numeric', hour: '2-digit', minute:'2-digit'});
+                    document.getElementById("modalLocation").innerText = info.event.extendedProps.location || "Not specified";
+                    document.getElementById("modalDescription").innerHTML = info.event.extendedProps.description || "No further details.";
+                    modal.style.display = "block";
+                    info.jsEvent.preventDefault();
+                }
+            });
+
+            calendar.render();
+
+            // 5. THE UPDATED FETCHER (Using JSON API method)
+            async function fetchCalendars() {
+                loadingEl.style.display = 'block';
+
+                for (const link of calendarLinks) {
+                    try {
+                        // Use AllOrigins /get endpoint to avoid CORS 'null' origin blocks
+                        // Adding a timestamp ensures we don't get a cached version
+                        const apiUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(link.url + '?t=' + Date.now())}`;
+                        
+                        const response = await fetch(apiUrl);
+                        if (!response.ok) throw new Error('Proxy unreachable');
+                        
+                        const data = await response.json();
+                        
+                        if (data.contents) {
+                            // Hand the raw ICS string directly to FullCalendar's iCalendar plugin
+                            calendar.addEventSource({
+                                icalEvent: data.contents,
+                                color: link.color,
+                                textColor: link.textColor
+                            });
+                            console.log(`Successfully loaded: ${link.label}`);
+                        }
+                    } catch (error) {
+                        console.error(`Error loading ${link.label}:`, error);
+                    }
+                }
+                
+                loadingEl.style.display = 'none';
+            }
+
+            fetchCalendars();
+        });
+    </script>
+</body>
+</html>
