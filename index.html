@@ -106,7 +106,7 @@
             <div class="legend-item"><span class="dot" style="background-color: #a1daf8;"></span> Whanganui Collegiate</div>
             <div class="legend-item"><span class="dot" style="background-color: #000cb6;"></span> St George's</div>
         </div>
-        <div id="loading">📡 Syncing Feeds...</div>
+        <div id="loading">📡 Syncing via Server Proxy...</div>
         <button id="theme-toggle">🌙 Dark Mode</button>
     </div>
 
@@ -141,20 +141,11 @@
             document.querySelector(".close-button").onclick = () => modal.style.display = "none";
             window.onclick = (e) => { if (e.target == modal) modal.style.display = "none"; }
 
-            // 3. DEFINE LINKS
-            const calendarLinks = [
-                {
-                    url: 'https://schoolbox.collegiate.school.nz/calendar/export.php?export=group&group=1139&event_type=&token=57bbf17cee18b093bc40299ad',
-                    color: '#a1daf8',
-                    textColor: '#000000',
-                    label: 'Whanganui Collegiate'
-                },
-                {
-                    url: 'https://stgeorges-portal.school.kiwi/ics/school.ics',
-                    color: '#000cb6',
-                    textColor: '#ffffff',
-                    label: 'St Georges'
-                }
+            // 3. DEFINE PHP PROXY TARGETS
+            // Use the "id" defined in your proxy.php file
+            const calendarFeeds = [
+                { id: 'wcs', color: '#a1daf8', textColor: '#000', label: 'Whanganui Collegiate' },
+                { id: 'stg', color: '#000cb6', textColor: '#fff', label: 'St Georges' }
             ];
 
             // 4. CALENDAR INITIALIZATION
@@ -183,57 +174,33 @@
 
             calendar.render();
 
-            // 5. FAILOVER PROXY FETCHER
-            async function fetchWithProxy(targetUrl) {
-                const encodedUrl = encodeURIComponent(targetUrl);
-                
-                // Array of proxy functions
-                const proxies = [
-                    // AllOrigins
-                    async () => {
-                        const response = await fetch(`https://api.allorigins.win/get?url=${encodedUrl}`);
-                        if (!response.ok) throw new Error('AllOrigins failed');
-                        const data = await response.json();
-                        return data.contents;
-                    },
-                    // WhateverOrigin
-                    async () => {
-                        const response = await fetch(`https://whateverorigin.org/get?url=${encodedUrl}`);
-                        if (!response.ok) throw new Error('WhateverOrigin failed');
-                        const data = await response.json();
-                        return data.contents;
-                    }
-                ];
-
-                for (let i = 0; i < proxies.length; i++) {
-                    try {
-                        console.log(`Attempting Proxy ${i + 1}...`);
-                        const result = await proxies[i]();
-                        if (result) return result;
-                    } catch (err) {
-                        console.warn(`Proxy ${i + 1} failed: ${err.message}`);
-                    }
-                }
-                throw new Error('All proxies failed to load the calendar data.');
-            }
-
-            // 6. MAIN LOADER
+            // 5. PHP PROXY LOADER
             async function fetchCalendars() {
                 loadingEl.style.display = 'block';
 
-                for (const link of calendarLinks) {
+                for (const feed of calendarFeeds) {
                     try {
-                        const icsData = await fetchWithProxy(link.url);
+                        // We call our own proxy.php with the specific ID
+                        // Added a timestamp to ensure fresh data every time
+                        const response = await fetch(`proxy.php?id=${feed.id}&t=${Date.now()}`);
                         
-                        calendar.addEventSource({
-                            icalEvent: icsData,
-                            color: link.color,
-                            textColor: link.textColor
-                        });
-                        console.log(`Successfully loaded: ${link.label}`);
+                        if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
+                        
+                        const icsData = await response.text();
+                        
+                        if (icsData.includes("BEGIN:VCALENDAR")) {
+                            calendar.addEventSource({
+                                icalEvent: icsData,
+                                color: feed.color,
+                                textColor: feed.textColor
+                            });
+                            console.log(`Successfully loaded: ${feed.label}`);
+                        } else {
+                            throw new Error("Invalid ICS format received");
+                        }
                         
                     } catch (error) {
-                        console.error(`Final error loading ${link.label}:`, error);
+                        console.error(`Error loading ${feed.label}:`, error);
                     }
                 }
                 
